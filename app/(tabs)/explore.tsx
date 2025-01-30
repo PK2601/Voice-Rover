@@ -1,12 +1,14 @@
+import base64 from 'base-64';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import {
   Alert,
-  FlatList,
+  PermissionsAndroid,
   Platform,
   SafeAreaView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -15,36 +17,25 @@ import { BleManager, Device } from 'react-native-ble-plx';
 // Initialize BLE Manager
 const bleManager = new BleManager();
 
-// Define your ESP32's service and characteristic UUIDs
-const ESP32_SERVICE_UUID = "YOUR_SERVICE_UUID";  // Replace with your ESP32's service UUID
-const ESP32_CHARACTERISTIC_UUID = "YOUR_CHARACTERISTIC_UUID";  // Replace with your characteristic UUID
+// ESP32 Identifiers (Change this to match your ESP32 name)
+const ESP32_DEVICE_NAME = "ESP32_Bluetooth";  // Ensure this matches your ESP32
+const ESP32_SERVICE_UUID = "12345678-1234-5678-1234-56789abcdef0";
+const ESP32_CHARACTERISTIC_UUID = "87654321-4321-6789-4321-abcdef012345";
 
 export default function BluetoothScreen() {
-  const [isScanning, setIsScanning] = useState(false);
-  const [devices, setDevices] = useState<Device[]>([]);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
+  const [receivedMessage, setReceivedMessage] = useState<string | null>(null);
+  const [messageToSend, setMessageToSend] = useState(''); // State to store the message to send
 
   useEffect(() => {
-    // Request required permissions on Android
-    const requestPermissions = async () => {
-      if (Platform.OS === 'android') {
-        const granted = await requestAndroidPermissions();
-        if (!granted) {
-          Alert.alert('Bluetooth Permission', 'Bluetooth permission is required');
-        }
-      }
-    };
-
     requestPermissions();
-
-    // Cleanup on component unmount
-    return () => {
-      bleManager.destroy();
-    };
+    return () => bleManager.destroy();
   }, []);
 
-  const requestAndroidPermissions = async () => {
+  // Request Bluetooth permissions for Android
+  const requestPermissions = async () => {
     if (Platform.OS === 'android') {
       const granted = await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
@@ -52,78 +43,65 @@ export default function BluetoothScreen() {
           title: 'Location Permission',
           message: 'Bluetooth requires location permission',
           buttonPositive: 'Allow',
-        },
+        }
       );
-      return granted === PermissionsAndroid.RESULTS.GRANTED;
-    }
-    return true;
-  };
-
-  const startScan = async () => {
-    if (!isScanning) {
-      // Clear existing devices
-      setDevices([]);
-      setIsScanning(true);
-      setConnectionStatus('Scanning...');
-
-      try {
-        bleManager.startDeviceScan(
-          null, // You can specify service UUIDs here if needed
-          { allowDuplicates: false },
-          (error, device) => {
-            if (error) {
-              console.error('Scan error:', error);
-              setIsScanning(false);
-              return;
-            }
-
-            if (device && device.name) {
-              // Add device to list if it has a name and isn't already listed
-              setDevices(prevDevices => {
-                if (!prevDevices.find(d => d.id === device.id)) {
-                  return [...prevDevices, device];
-                }
-                return prevDevices;
-              });
-            }
-          }
-        );
-
-        // Stop scan after 10 seconds
-        setTimeout(() => {
-          bleManager.stopDeviceScan();
-          setIsScanning(false);
-          setConnectionStatus('Scan Complete');
-        }, 10000);
-      } catch (error) {
-        console.error('Scan error:', error);
-        setIsScanning(false);
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        Alert.alert('Permission Denied', 'Location permission is required for BLE');
       }
     }
   };
 
-  const connectToDevice = async (device: Device) => {
-    try {
-      setConnectionStatus('Connecting...');
-      const connectedDevice = await device.connect();
-      setConnectedDevice(connectedDevice);
-      setConnectionStatus('Connected to ' + device.name);
+  // Automatically scan and connect to ESP32
+  const connectToESP32 = async () => {
+    if (isConnecting) return;
+    setIsConnecting(true);
+    setConnectionStatus('Searching for ESP32...');
 
-      // Discover services and characteristics
-      await connectedDevice.discoverAllServicesAndCharacteristics();
+    let deviceFound = false; // Track if ESP32 is found
 
-      // Set up notification listener if needed
-      await setupNotifications(connectedDevice);
+    bleManager.startDeviceScan(null, { allowDuplicates: false }, async (error, device) => {
+      if (error) {
+        console.error('Scan error:', error);
+        setIsConnecting(false);
+        setConnectionStatus('Error during scan');
+        return;
+      }
 
-    } catch (error) {
-      console.error('Connection error:', error);
-      setConnectionStatus('Connection failed');
-    }
+      if (device?.name === ESP32_DEVICE_NAME) {
+        deviceFound = true; // ESP32 was found
+        bleManager.stopDeviceScan();
+        setConnectionStatus(`Connecting to ${device.name}...`);
+
+        try {
+          const connected = await device.connect();
+          setConnectedDevice(connected);
+          setConnectionStatus(`Connected to ${device.name}! ✅`);
+          await connected.requestMTU(512);
+          await connected.discoverAllServicesAndCharacteristics();
+          setupNotifications(connected);
+        } catch (error) {
+          console.error('Connection error:', error);
+          setConnectionStatus('Connection failed');
+        } finally {
+          setIsConnecting(false);
+        }
+      }
+    });
+
+    // Stop scan after 10 seconds if no ESP32 is found
+    setTimeout(() => {
+      bleManager.stopDeviceScan();
+      setIsConnecting(false);
+      if (!deviceFound) {
+        setConnectionStatus('ESP32 not found. Try again.');
+      }
+    }, 10000);
   };
 
+
+  // Subscribe to ESP32 Notifications (Receive Data)
   const setupNotifications = async (device: Device) => {
     try {
-      // Monitor characteristic changes
       device.monitorCharacteristicForService(
         ESP32_SERVICE_UUID,
         ESP32_CHARACTERISTIC_UUID,
@@ -133,33 +111,58 @@ export default function BluetoothScreen() {
             return;
           }
           if (characteristic?.value) {
-            // Handle incoming data
-            const value = base64.decode(characteristic.value);
-            console.log('Received value:', value);
+            const decodedValue = base64.decode(characteristic.value);
+            setReceivedMessage(decodedValue);
+            console.log('Received from ESP32:', decodedValue);
           }
         }
       );
     } catch (error) {
-      console.error('Notification setup error:', error);
+      console.error('Subscription error:', error);
     }
   };
 
-  const sendCommand = async (command: string) => {
+  // Send Commands to ESP32
+  const sendCommand = async () => {
     if (!connectedDevice) {
       Alert.alert('Error', 'No device connected');
       return;
     }
+    if (!messageToSend.trim()) {
+      Alert.alert('Error', 'Please enter a message');
+      return;
+    }
 
     try {
-      await connectedDevice.writeCharacteristicWithoutResponse(
+      await connectedDevice.writeCharacteristicWithResponseForService(
         ESP32_SERVICE_UUID,
         ESP32_CHARACTERISTIC_UUID,
-        base64.encode(command)
+        base64.encode(messageToSend)
       );
-      console.log('Command sent:', command);
+      console.log('Sent to ESP32:', messageToSend);
+      setMessageToSend(''); // Clear the input after sending
     } catch (error) {
       console.error('Send command error:', error);
       Alert.alert('Error', 'Failed to send command');
+    }
+  };
+
+  // Disconnect from ESP32
+  const disconnectFromESP32 = async () => {
+    if (!connectedDevice) return;
+
+    try {
+      if (await connectedDevice.isConnected()) { // Check if still connected before disconnecting
+        await connectedDevice.cancelConnection(); // Properly disconnect the device
+        setConnectedDevice(null); // Clear the connected device state
+        setConnectionStatus('Disconnected'); // Update connection status
+        setReceivedMessage(null); // Clear any received messages
+      } else {
+        setConnectionStatus('Device already disconnected');
+      }
+    } catch (error) {
+      console.error('Disconnection error:', error);
+      Alert.alert('Error', 'Failed to disconnect');
     }
   };
 
@@ -168,42 +171,39 @@ export default function BluetoothScreen() {
       <StatusBar style="auto" />
       <View style={styles.content}>
         <Text style={styles.status}>{connectionStatus}</Text>
-        
-        <TouchableOpacity 
-          style={styles.scanButton}
-          onPress={startScan}
-          disabled={isScanning}
-        >
-          <Text style={styles.buttonText}>
-            {isScanning ? 'Scanning...' : 'Scan for Devices'}
-          </Text>
-        </TouchableOpacity>
 
-        <FlatList
-          data={devices}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.deviceItem}
-              onPress={() => connectToDevice(item)}
-            >
-              <Text style={styles.deviceName}>{item.name || 'Unknown Device'}</Text>
-              <Text style={styles.deviceId}>{item.id}</Text>
-            </TouchableOpacity>
-          )}
-          style={styles.deviceList}
-        />
+        {/* Button to Auto Connect to ESP32 */}
+        {!connectedDevice && (
+          <TouchableOpacity style={styles.connectButton} onPress={connectToESP32} disabled={isConnecting}>
+            <Text style={styles.buttonText}>{isConnecting ? 'Connecting...' : 'Connect to ESP32'}</Text>
+          </TouchableOpacity>
+        )}
 
+        {/* Button to Disconnect from ESP32 */}
         {connectedDevice && (
-          <View style={styles.controlsContainer}>
-            <TouchableOpacity 
-              style={styles.controlButton}
-              onPress={() => sendCommand('FORWARD')}
-            >
-              <Text style={styles.buttonText}>Forward</Text>
+          <TouchableOpacity style={styles.connectButton} onPress={disconnectFromESP32}>
+            <Text style={styles.buttonText}>Disconnect from ESP32</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Show received message from ESP32 only if connected */}
+        {connectedDevice && receivedMessage && (
+          <Text style={styles.receivedMessage}>ESP32: {receivedMessage}</Text>
+        )}
+
+        {/* TextInput for sending a custom message */}
+        {connectedDevice && (
+          <>
+            <TextInput
+              style={styles.input}
+              placeholder="Type your message here"
+              value={messageToSend}
+              onChangeText={setMessageToSend}
+            />
+            <TouchableOpacity style={styles.sendButton} onPress={sendCommand}>
+              <Text style={styles.buttonText}>Send Message</Text>
             </TouchableOpacity>
-            {/* Add more control buttons as needed */}
-          </View>
+          </>
         )}
       </View>
     </SafeAreaView>
@@ -211,55 +211,12 @@ export default function BluetoothScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  content: {
-    flex: 1,
-    padding: 20,
-  },
-  status: {
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  scanButton: {
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 8,
-    marginBottom: 20,
-  },
-  buttonText: {
-    color: '#fff',
-    textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  deviceList: {
-    flex: 1,
-  },
-  deviceItem: {
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ccc',
-  },
-  deviceName: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  deviceId: {
-    fontSize: 12,
-    color: '#666',
-  },
-  controlsContainer: {
-    marginTop: 20,
-    padding: 10,
-  },
-  controlButton: {
-    backgroundColor: '#4CAF50',
-    padding: 15,
-    borderRadius: 8,
-    marginVertical: 5,
-  },
+  container: { flex: 1, backgroundColor: '#fff' },
+  content: { flex: 1, padding: 20, alignItems: 'center' },
+  status: { fontSize: 16, textAlign: 'center', marginBottom: 20, fontWeight: 'bold' },
+  connectButton: { backgroundColor: '#007AFF', padding: 15, borderRadius: 8, marginBottom: 20, width: 200, alignItems: 'center' },
+  buttonText: { color: '#fff', textAlign: 'center', fontSize: 16, fontWeight: '600' },
+  input: { height: 40, borderColor: '#ccc', borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, marginBottom: 20, width: 200 },
+  sendButton: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 8, marginVertical: 5, width: 120, alignItems: 'center' },
+  receivedMessage: { fontSize: 16, fontWeight: 'bold', textAlign: 'center', marginVertical: 10, color: '#333' },
 });
