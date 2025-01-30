@@ -9,13 +9,29 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.vrtg",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "This app requires Bluetooth to connect to the ESP32 rover.",
+        "NSBluetoothPeripheralUsageDescription": "This app needs Bluetooth to communicate with the ESP32 rover.",
+        "NSLocationWhenInUseUsageDescription": "Location access is required for Bluetooth scanning.",
+        "NSLocationAlwaysUsageDescription": "Location access is required to scan for Bluetooth devices in the background.",
+        "UIBackgroundModes": ["bluetooth-central"]
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "package": "com.anonymous.vrtg",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_ADVERTISE",
+        "BLUETOOTH_CONNECT"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -31,6 +47,13 @@
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "bluetoothAlwaysPermission": "Allow Bluetooth access to connect to the ESP32 rover.",
+          "bluetoothPeripheralUsageDescription": "This app requires Bluetooth to communicate with the ESP32 rover."
         }
       ]
     ],
