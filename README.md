@@ -28,17 +28,17 @@ This project demonstrates a full-stack embedded solution combining **hardware**,
 ```
 Voice-Rover/
 │
-├── app/                        # React Native App (iOS)
+├── /BLE App/app/(tabs)                    # React Native App (iOS)
 │   ├── index.tsx
 │   ├── explore.tsx
 │   └── _layout.tsx
 │
-├── esp32/                      # Arduino code for ESP32
+├── ESP32/BLEWorkingCode                   # Arduino code for ESP32
 │   └── BLEWorkingCode.ino
 │
-├── assets/                     # CAD files, images, renders
-│   ├── car.glb
-│   └── render.png
+├── CAD Model/                              # CAD files
+│   ├── 
+│   └── 
 │
 └── README.md
 ```
@@ -81,16 +81,12 @@ The iOS app automatically scans for the ESP32 device, connects, and allows users
 
 | Part                         | Quantity |
 |------------------------------|----------|
-| ESP32 Dev Board              | 1        |
-| L298N Motor Driver           | 1        |
-| DC Motors                    | 2        |
+| ESP32 WROOM-32               | 1        |
+| TB6612FNG Dual Motor Driver  | 2        |
+| N20 DC Gear MotoR            | 4        |
 | Tank Track Kit (Chassis)     | 1        |
-| 7.4V Rechargeable Battery    | 1        |
-| Jumper Wires                 | -        |
-| Breadboard                   | 1        |
+| Time of Flight Sensor        | 3        |
 | Custom 3D Printed Chassis    | 1        |
-| Power Switch (Toggle)        | 1        |
-| USB Cable for ESP32          | 1        |
 
 > 🛠️ Note: The tank track components are currently pending delivery. The CAD model is ready, but due to extended print time and limited McMaster Makerspace access, physical integration is in progress and will be updated soon.
 
@@ -102,9 +98,7 @@ The iOS app automatically scans for the ESP32 device, connects, and allows users
 *(Insert render or assembly image here)*
 
 ### 📁 CAD Files  
-- [`car.glb`](./assets/car.glb)
 
----
 
 ## 🔧 Setup Instructions
 
@@ -150,19 +144,6 @@ All commands and responses are encoded in base64 during transmission.
 - 🎙️ Integrate speech-to-text for full voice control
 - 🧱 Complete 3D print assembly and mounting
 - 📲 Publish the app on TestFlight
-
----
-
-## 👨‍💻 Author
-
-**Abaan Khan**  
-🔗 [LinkedIn](https://www.linkedin.com/) | 🌐 [GitHub](https://github.com/yourusername)
-
----
-
-## 📄 License
-
-This project is open-source and available under the [MIT License](LICENSE).
 
 ---
 
